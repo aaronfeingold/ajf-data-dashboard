@@ -1,16 +1,21 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, Suspense, useEffect } from "react";
 import SummaryWidget from "@/components/Dashboard/widgets/SummaryWidget";
 import PropertyClassPieChart from "@/components/Dashboard/widgets/PropertyClassPieChart";
 import GeolocationWidget from "@/components/Dashboard/widgets/GeolocationWidget";
 import DataTableWidget from "@/components/Dashboard/widgets/DataTableWidget";
 import TrendsWidget from "@/components/Dashboard/widgets/TrendsWidget";
+import ContentLoading from "@/components/Loading/ContentLoading";
+import { usePropertyData } from "@/components/Providers/PropertyDataProvider";
+import { useAppSelector } from "@/store/hooks";
+import { selectPropertyStatus } from "@/store/propertySlice";
+import PageLoading from "@/components/Loading/PageLoading";
 import GridLayout from "react-grid-layout";
-// TODO: USE THE RESPONSE GRID INSTEAD
 import { WidthProvider } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
+import { logger } from "@/utils/logger";
 
 const ReactGridLayout = WidthProvider(GridLayout);
 
@@ -66,7 +71,33 @@ const initialLayout: LayoutItem[] = [
   },
 ];
 
+// Widget wrapper component with Suspense
+const WidgetWrapper = ({
+  children,
+  title,
+  loadingMessage = "Loading widget...",
+}: {
+  children: React.ReactNode;
+  title: string;
+  loadingMessage?: string;
+}) => (
+  <Suspense
+    fallback={
+      <ContentLoading
+        message={loadingMessage}
+        size="small"
+        containerClassName="h-full"
+        title={title}
+      />
+    }
+  >
+    {children}
+  </Suspense>
+);
+
 export default function DashboardPage() {
+  const { isLoading } = usePropertyData();
+  const status = useAppSelector(selectPropertyStatus);
   const [isEditMode, setIsEditMode] = useState(false);
   const [layout, setLayout] = useState<LayoutItem[]>(initialLayout);
   const [visibleSections, setVisibleSections] = useState({
@@ -74,6 +105,28 @@ export default function DashboardPage() {
     trends: true,
     dataTable: true,
   });
+  const [showDashboard, setShowDashboard] = useState(false);
+
+  // Handle initial transition
+  useEffect(() => {
+    logger.debug("Dashboard", "Initial dashboard load, tracking transition", {
+      isLoading,
+      status,
+    });
+
+    // Always show dashboard after a maximum of 3 seconds, regardless of loading state
+    const maxTransitionTime = setTimeout(() => {
+      setShowDashboard(true);
+    }, 3000);
+
+    // If loading completes earlier, show dashboard
+    if (!isLoading) {
+      setShowDashboard(true);
+      clearTimeout(maxTransitionTime);
+    }
+
+    return () => clearTimeout(maxTransitionTime);
+  }, [isLoading, status]);
 
   const toggleSection = (section: keyof typeof visibleSections) => {
     setVisibleSections((prev) => {
@@ -123,6 +176,10 @@ export default function DashboardPage() {
     flex justify-between items-center p-4
     ${isEditMode ? "cursor-move bg-gray-50 dark:bg-gray-700 rounded" : ""}
   `;
+
+  if (!showDashboard) {
+    return <PageLoading message="Loading dashboard..." />;
+  }
 
   return (
     <div className="p-4 bg-gray-100 dark:bg-gray-900 min-h-screen">
@@ -190,9 +247,24 @@ export default function DashboardPage() {
           {visibleSections.overview && (
             <div className="p-4">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-full">
-                <SummaryWidget />
-                <PropertyClassPieChart />
-                <GeolocationWidget />
+                <WidgetWrapper
+                  title="Summary"
+                  loadingMessage="Loading summary data..."
+                >
+                  <SummaryWidget />
+                </WidgetWrapper>
+                <WidgetWrapper
+                  title="Property Classes"
+                  loadingMessage="Loading property classes..."
+                >
+                  <PropertyClassPieChart />
+                </WidgetWrapper>
+                <WidgetWrapper
+                  title="Geolocation"
+                  loadingMessage="Loading geolocation data..."
+                >
+                  <GeolocationWidget />
+                </WidgetWrapper>
               </div>
             </div>
           )}
@@ -228,7 +300,12 @@ export default function DashboardPage() {
           </div>
           {visibleSections.trends && (
             <div className="p-4 h-full overflow-auto">
-              <TrendsWidget />
+              <WidgetWrapper
+                title="Trends"
+                loadingMessage="Loading trends data..."
+              >
+                <TrendsWidget />
+              </WidgetWrapper>
             </div>
           )}
         </div>
@@ -263,7 +340,12 @@ export default function DashboardPage() {
           </div>
           {visibleSections.dataTable && (
             <div className="flex-1 h-[calc(100%-4rem)] overflow-hidden">
-              <DataTableWidget />
+              <WidgetWrapper
+                title="Data Table"
+                loadingMessage="Loading property data..."
+              >
+                <DataTableWidget />
+              </WidgetWrapper>
             </div>
           )}
         </div>

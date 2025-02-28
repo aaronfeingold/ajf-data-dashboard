@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
 import { FcGoogle } from "react-icons/fc";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import {
@@ -9,6 +8,7 @@ import {
   selectAuthStatus,
   selectAuthError,
   selectIsAuthenticated,
+  forceLogout,
 } from "@/store/authSlice";
 import CitySkylineLoading from "@/components/Loading/CitySkylineLoading";
 import {
@@ -24,7 +24,6 @@ import { logger } from "@/utils/logger";
 
 export default function Page() {
   const dispatch = useAppDispatch();
-  const router = useRouter();
   const [username, setUsername] = useState<string>("");
   const [password, setPassword] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
@@ -33,32 +32,43 @@ export default function Page() {
   const authError = useAppSelector(selectAuthError);
   const isAuthenticated = useAppSelector(selectIsAuthenticated);
   const redirectingRef = useRef(false);
-  logger.info("Login page loaded", "authStatus", authStatus);
+
+  logger.info("Login page loaded", authStatus);
+
+  // Ensure we're fully logged out when visiting the login page
+  useEffect(() => {
+    // If we somehow got to the login page while authenticated,
+    // make sure to force logout to clear state
+    if (isAuthenticated) {
+      logger.warn(
+        "Login",
+        "Still authenticated when visiting login page, forcing logout"
+      );
+      dispatch(forceLogout());
+    }
+  }, [dispatch, isAuthenticated]);
 
   useEffect(() => {
     // Prevent multiple redirects with the ref
     if (isAuthenticated && !redirectingRef.current) {
-      console.log(
-        "Login page detected authenticated state, redirecting to dashboard"
-      );
+      logger.info("Login", "Authenticated, redirecting to dashboard");
       redirectingRef.current = true;
 
-      // Add a small delay to avoid race conditions with middleware
-      setTimeout(() => {
-        router.push("/dashboard");
-      }, 100);
+      // Use window.location for a hard navigation to ensure everything is properly loaded
+      window.location.href = "/dashboard";
     }
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
     try {
-      const result = await dispatch(loginUser({ username, password }));
+      const result = await dispatch(loginUser({ username, password })).unwrap();
 
-      if (result.meta.requestStatus === "fulfilled") {
-        router.push("/dashboard");
+      if (result) {
+        // Don't use router.push here to avoid the sidebar issue
+        // The useEffect above will handle redirection via window.location
       } else {
         setError(authError?.message || "Authentication failed");
       }

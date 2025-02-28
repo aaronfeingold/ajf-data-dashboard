@@ -12,8 +12,9 @@ import {
   fetchPropertyData,
   loadPropertyDataFromCache,
   clearPropertyData,
+  selectPropertyStatus,
+  selectAllProperties,
 } from "@/store/propertySlice";
-import type { RootState } from "@/store/store";
 import type { GetAllPropertyRecordCards } from "@/types/api";
 import { logger } from "@/utils/logger";
 import { indexedDBService } from "@/services/indexedDbService";
@@ -36,15 +37,47 @@ export const PropertyDataProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const dispatch = useAppDispatch();
-  const { status, data } = useAppSelector((state: RootState) => state.property);
+  const status = useAppSelector(selectPropertyStatus);
+  const data = useAppSelector(selectAllProperties);
   const [error, setError] = useState<Error | null>(null);
   const fetchCounter = useRef(0);
   const isInitialized = useRef(false);
+  const [initializationComplete, setInitializationComplete] = useState(false);
+  const [transitionComplete, setTransitionComplete] = useState(false);
+
+  // For a better UX with min/max transition times
+  useEffect(() => {
+    // Minimum transition time of 1 second
+    const minTransitionTime = setTimeout(() => {
+      logger.debug("PropertyDataProvider", "Minimum transition time reached");
+    }, 1000);
+
+    // Maximum transition time of 3 seconds
+    const maxTransitionTime = setTimeout(() => {
+      logger.debug(
+        "PropertyDataProvider",
+        "Maximum transition time reached, forcing completion"
+      );
+      setTransitionComplete(true);
+      setInitializationComplete(true);
+    }, 3000);
+
+    return () => {
+      clearTimeout(minTransitionTime);
+      clearTimeout(maxTransitionTime);
+    };
+  }, []);
 
   useEffect(() => {
     if (isInitialized.current) return;
     isInitialized.current = true;
-    if (status === "loading" || (data && data.data.length > 0)) {
+
+    if (status === "succeeded" && data && data.data.length > 0) {
+      logger.debug(
+        "PropertyDataProvider",
+        "Data already loaded, skipping fetch"
+      );
+      setInitializationComplete(true);
       return;
     }
 
@@ -75,6 +108,9 @@ export const PropertyDataProvider: React.FC<{ children: React.ReactNode }> = ({
             await dispatch(fetchPropertyData({})).unwrap();
           }
         }
+
+        // Mark initialization as complete regardless of outcome
+        setInitializationComplete(true);
       } catch (err) {
         setError(
           err instanceof Error
@@ -82,6 +118,8 @@ export const PropertyDataProvider: React.FC<{ children: React.ReactNode }> = ({
             : new Error("Failed to fetch property data")
         );
         console.error("Failed to fetch property data:", err);
+        // Still mark initialization as complete even with an error
+        setInitializationComplete(true);
       }
     };
 
@@ -89,6 +127,24 @@ export const PropertyDataProvider: React.FC<{ children: React.ReactNode }> = ({
 
     // Don't reset fetchCounter on unmount to prevent refetching
   }, [dispatch, status, data]);
+
+  // Monitor status changes to ensure we transition out of loading
+  useEffect(() => {
+    if (status === "succeeded") {
+      setInitializationComplete(true);
+    }
+  }, [status]);
+
+  // Keep track of how long we've been loading
+  useEffect(() => {
+    if (!transitionComplete) {
+      const timeoutId = setTimeout(() => {
+        setTransitionComplete(true);
+      }, 1500); // Minimum 1.5s transition time
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [transitionComplete]);
 
   const clearData = async () => {
     try {
@@ -101,12 +157,25 @@ export const PropertyDataProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
+  // Calculate isLoading based on transition time and initialization
+  // This ensures we have a nice minimum transition time for UX purposes
+  // but we don't wait forever for data if it takes too long
+  const isLoading = !transitionComplete;
+
   const contextValue: PropertyContextValue = {
-    isLoading: status === "loading",
+    isLoading,
     error,
     data,
     clearData,
   };
+
+  logger.debug("PropertyDataProvider", "Render state", {
+    isLoading,
+    status,
+    hasData: data?.data.length > 0,
+    initComplete: initializationComplete,
+    transitionComplete,
+  });
 
   return (
     <PropertyDataContext.Provider value={contextValue}>

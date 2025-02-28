@@ -1,5 +1,10 @@
-import ClientChatPage from "@/app/chat/[id]/ClientChatPage";
+"use client";
 
-export default function Page() {
-  return <ClientChatPage />;
+import ChatPage from "@/app/chat/[id]/ChatPage";
+import { withAuth } from "@/hooks/useProtectedRoute";
+
+function ClientChatPage() {
+  return <ChatPage />;
 }
+
+export default withAuth(ClientChatPage);
